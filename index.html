@@ -495,7 +495,7 @@ tailwind.config = {
     <div class="flex flex-wrap items-center justify-between gap-2">
       <h3 class="text-sm font-bold text-[#1d2772]">Load Bearing Capacity of Driven Pile Foundation — เสาเข็มตอก <span class="font-normal text-slate-400">(อ้างอิง Sheet: Driven C)</span></h3>
       <div class="flex flex-wrap items-center gap-2">
-        <button id="plClearD" class="text-xs px-3.5 py-2 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 transition font-semibold">🗑 ล้างข้อมูลชั้นดิน/ปลายเข็ม</button>
+        <button id="plClearD"class="text-xs px-3.5 py-2 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 transition font-semibold">🗑 ล้างข้อมูลหลุมเจาะ/ชั้นดิน/ปลายเข็ม</button>
         <button id="plExportD" class="text-xs px-3.5 py-2 rounded-lg bg-[#1d2772] text-white font-semibold hover:bg-[#0c1557] transition">📊 Export Excel หมวดเสาเข็ม</button>
       </div>
     </div>
@@ -3667,23 +3667,32 @@ const PL_TYPES = ['Clay','Sand'];
 const PL_GRP = {square:'Square Pile', I:'I-Section Pile', spun:'Spun Pile', bored:'Bore Pile'};
 
 function plDefault(){ return {
-  project:'', location:'', hole:'', depth:'', calcBy:'', gwl:'', top:'', fs:'', nf:'', capD:'', capB:'',
-  layers:[{from:'',to:'',type:'',N:''}],
+  project:'',
+  location:'',
+  hole:'', depth:'', calcBy:'', gwl:'', top:'', fs:'2.5', nf:'0', capD:'800', capB:'600',
+  layers:[{from:'0',to:'',type:'',N:''}],
   tips:[{z:'',nc:'',ns:''}],
-  dSizes:[{g:'square',B:'',P:'',A:''}],
-  bSizes:[{D:''}]
+  dSizes:[{g:'square',B:'0.22',P:'',A:''},{g:'square',B:'0.26',P:'',A:''},{g:'square',B:'0.30',P:'',A:''},{g:'square',B:'0.35',P:'',A:''},{g:'square',B:'0.40',P:'',A:''},
+          {g:'I',B:'0.22',P:'1.09',A:'0.033'},{g:'I',B:'0.26',P:'1.24',A:'0.048'},{g:'I',B:'0.30',P:'1.51',A:'0.06'},{g:'I',B:'0.35',P:'1.71',A:'0.0797'},
+          {g:'spun',B:'0.40',P:'',A:'0.0766'},{g:'spun',B:'0.50',P:'',A:'0.1159'},{g:'spun',B:'0.60',P:'',A:'0.1571'}],
+  bSizes:[{D:'0.35'},{D:'0.50'},{D:'0.60'},{D:'0.80'},{D:'1.00'}]
 };}
 let PILE = plDefault();
 const PL_FLT = {soilD:'',layerD:'',tipD:'',grpD:'',soilB:'',layerB:'',tipB:'',recTipD:'',recGrpD:'',recSecD:'',recMinD:'',recTipB:'',recSecB:'',recMinB:''};
 
-// V2: เริ่มต้นแบบว่าง — ไม่โหลดข้อมูลตัวอย่างเดิม (7726BH01) ที่บันทึกไว้ใน pileCalcV1
-function plKey(){ return userKey('pileCalcV2'); }
+function plKey(){ return userKey('pileCalcV1'); }
 function plSave(){ try{ if(ACTIVE_USER) localStorage.setItem(plKey(), JSON.stringify(PILE)); }catch(e){ console.warn('plSave',e); } }
 let _plSaveT=null; function plSaveSoon(){ clearTimeout(_plSaveT); _plSaveT=setTimeout(plSave,250); }
 function plLoad(){
   try{ const raw=localStorage.getItem(plKey()); if(!raw) return;
     const st=JSON.parse(raw);
-    if(st && Array.isArray(st.layers) && st.layers.length && Array.isArray(st.tips)) PILE={...plDefault(), ...st};
+    if(st && Array.isArray(st.layers) && st.layers.length && Array.isArray(st.tips)){
+      // ล้างข้อมูลหลุมเจาะตัวอย่างเดิม (7726BH01) ที่อาจค้างอยู่ใน localStorage จากไฟล์เวอร์ชันก่อน
+      if(st.hole==='7726BH01' && String(st.location||'').includes('7726')){
+        Object.assign(st,{project:'',location:'',hole:'',depth:'',gwl:'',top:'',layers:[{from:'0',to:'',type:'',N:''}],tips:[{z:'',nc:'',ns:''}]});
+      }
+      PILE={...plDefault(), ...st};
+    }
   }catch(e){ console.warn('plLoad',e); }
 }
 window.addEventListener('beforeunload', ()=>{ if(ACTIVE_USER) plSave(); });
@@ -4160,8 +4169,8 @@ function initPileModule(){
       if(lk.isClay){ PILE.tips[i].nc=String(lk.N); PILE.tips[i].ns=''; } else { PILE.tips[i].ns=String(Math.round(lk.Nadj*100)/100); PILE.tips[i].nc=''; } n++; });
     plStructChanged(); toast(n?`เติม SPT-N ให้ปลายเข็ม ${n} ระดับแล้ว`:'ไม่พบปลายเข็มที่อยู่ในช่วงชั้นดิน', n?'success':'warning');
   });
-  on('plClearD',()=>{ Swal.fire({icon:'warning',title:'ล้างข้อมูลชั้นดินและปลายเข็ม?',text:'ขนาดเสาเข็มและพารามิเตอร์ (GWL, F.S. ฯลฯ) จะยังคงอยู่',showCancelButton:true,confirmButtonText:'ล้างข้อมูล',confirmButtonColor:'#e79c9c',cancelButtonText:'ยกเลิก'})
-    .then(r=>{ if(!r.isConfirmed) return; PILE.layers=[{from:'0',to:'',type:'',N:''}]; PILE.tips=[{z:'',nc:'',ns:''}]; plStructChanged(); toast('ล้างข้อมูลชั้นดิน/ปลายเข็มแล้ว'); }); });
+  on('plClearD',()=>{ Swal.fire({icon:'warning',title:'ล้างข้อมูลหลุมเจาะ ชั้นดิน และปลายเข็ม?',text:'ขนาดเสาเข็มและค่า F.S./NF/qe จะยังคงอยู่',showCancelButton:true,confirmButtonText:'ล้างข้อมูล',confirmButtonColor:'#e79c9c',cancelButtonText:'ยกเลิก'})
+    .then(r=>{ if(!r.isConfirmed) return; PILE.project='';PILE.location='';PILE.hole='';PILE.depth='';PILE.calcBy='';PILE.gwl='';PILE.top='';PILE.layers=[{from:'0',to:'',type:'',N:''}]; PILE.tips=[{z:'',nc:'',ns:''}]; plRenderSettings(); plStructChanged(); toast('ล้างข้อมูลหลุมเจาะ/ชั้นดิน/ปลายเข็มแล้ว'); }); });
   ['plExportD','plExportB','plExportRD','plExportRB'].forEach(id=>on(id,plExportExcel));
   on('plGoDriven',()=>switchTab('pdriven'));
 }
