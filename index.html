@@ -3667,18 +3667,17 @@ const PL_TYPES = ['Clay','Sand'];
 const PL_GRP = {square:'Square Pile', I:'I-Section Pile', spun:'Spun Pile', bored:'Bore Pile'};
 
 function plDefault(){ return {
-  project:'', location:'', hole:'', depth:'', calcBy:'', gwl:'', top:'', fs:'2.5', nf:'0', capD:'800', capB:'600',
-  layers:[{from:'0',to:'',type:'',N:''}],
+  project:'', location:'', hole:'', depth:'', calcBy:'', gwl:'', top:'', fs:'', nf:'', capD:'', capB:'',
+  layers:[{from:'',to:'',type:'',N:''}],
   tips:[{z:'',nc:'',ns:''}],
-  dSizes:[{g:'square',B:'0.22',P:'',A:''},{g:'square',B:'0.26',P:'',A:''},{g:'square',B:'0.30',P:'',A:''},{g:'square',B:'0.35',P:'',A:''},{g:'square',B:'0.40',P:'',A:''},
-          {g:'I',B:'0.22',P:'1.09',A:'0.033'},{g:'I',B:'0.26',P:'1.24',A:'0.048'},{g:'I',B:'0.30',P:'1.51',A:'0.06'},{g:'I',B:'0.35',P:'1.71',A:'0.0797'},
-          {g:'spun',B:'0.40',P:'',A:'0.0766'},{g:'spun',B:'0.50',P:'',A:'0.1159'},{g:'spun',B:'0.60',P:'',A:'0.1571'}],
-  bSizes:[{D:'0.35'},{D:'0.50'},{D:'0.60'},{D:'0.80'},{D:'1.00'}]
+  dSizes:[{g:'square',B:'',P:'',A:''}],
+  bSizes:[{D:''}]
 };}
 let PILE = plDefault();
 const PL_FLT = {soilD:'',layerD:'',tipD:'',grpD:'',soilB:'',layerB:'',tipB:'',recTipD:'',recGrpD:'',recSecD:'',recMinD:'',recTipB:'',recSecB:'',recMinB:''};
 
-function plKey(){ return userKey('pileCalcV1'); }
+// V2: เริ่มต้นแบบว่าง — ไม่โหลดข้อมูลตัวอย่างเดิม (7726BH01) ที่บันทึกไว้ใน pileCalcV1
+function plKey(){ return userKey('pileCalcV2'); }
 function plSave(){ try{ if(ACTIVE_USER) localStorage.setItem(plKey(), JSON.stringify(PILE)); }catch(e){ console.warn('plSave',e); } }
 let _plSaveT=null; function plSaveSoon(){ clearTimeout(_plSaveT); _plSaveT=setTimeout(plSave,250); }
 function plLoad(){
