@@ -495,7 +495,6 @@ tailwind.config = {
     <div class="flex flex-wrap items-center justify-between gap-2">
       <h3 class="text-sm font-bold text-[#1d2772]">Load Bearing Capacity of Driven Pile Foundation — เสาเข็มตอก <span class="font-normal text-slate-400">(อ้างอิง Sheet: Driven C)</span></h3>
       <div class="flex flex-wrap items-center gap-2">
-        <button id="plSampleD" class="text-xs px-3.5 py-2 rounded-lg bg-[#e7e8f1] text-[#1d2772] font-semibold hover:bg-[#cacde2] transition">↺ โหลดข้อมูลตัวอย่าง (Excel)</button>
         <button id="plClearD" class="text-xs px-3.5 py-2 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 transition font-semibold">🗑 ล้างข้อมูลชั้นดิน/ปลายเข็ม</button>
         <button id="plExportD" class="text-xs px-3.5 py-2 rounded-lg bg-[#1d2772] text-white font-semibold hover:bg-[#0c1557] transition">📊 Export Excel หมวดเสาเข็ม</button>
       </div>
@@ -2449,6 +2448,11 @@ const ATT_SCHEMA = {
     adjWater:{type:"NUMBER", nullable:true}
   }, required:["no","blows","canNo","a","b","c"]}
 };
+const ATT_SCHEMA_LOWER = {
+  type:"ARRAY",
+  description:"One object per sample column of the LOWER table that contains any handwritten data, left-to-right. Skip completely blank columns. Return [] if the whole lower table is blank.",
+  items:ATT_SCHEMA.items
+};
 const UCT_SCHEMA = {
   type:"OBJECT", properties:{
     no:{type:"STRING", nullable:true}, depth:{type:"STRING", nullable:true},
@@ -2813,30 +2817,55 @@ CRITICAL COLUMN ALIGNMENT:
     const arr=await callGemini([{data:crop}],prompt,1800,ATT_SCHEMA,'Atterberg',[CFG.GEM_PRIMARY,CFG.GEM_STABLE_FALLBACK,CFG.GEM_FALLBACK]);
     if(!Array.isArray(arr)||!arr.length) throw new Error('ไม่พบข้อมูลตัวอย่างในรูปภาพ');
 
+    // ตารางล่าง (ตัวอย่างที่ 13 เป็นต้นไป) — อ่านแยกอีกครั้ง ถ้าอ่านไม่สำเร็จจะไม่กระทบผลของตารางบน
+    let lower=[], lowerErr='';
+    try{
+      const cropLow=await cropImageRectData(src,probe.w*0.075,probe.h*0.52,probe.w*0.865,probe.h*0.33,1800);
+      const promptLow=`This image is the LOWER Atterberg's Limits table of the same sheet. It continues the sample numbering of the upper table (for example 13, 14, ...).
+Return ONE JSON object for EACH sample column that contains any handwritten value, in left-to-right order. Skip columns that are completely blank. If the whole table is blank, return [].
+Map ONLY values in the SAME vertical column:
+- no = Sample No. row exactly as written (e.g. 13)
+- depth = Depth M. row
+- testType = Type of test row
+- blows = Number of Blows row (preserve NP literally)
+- canNo = Can No. row
+- a = Wt. Can (gm.)
+- b = Can+Wet soil (gm.)
+- c = Can+Dry soil (gm.)
+Blank cells are null. Do not invent values. Do not calculate. Return JSON only.`;
+      const r=await callGemini([{data:cropLow}],promptLow,1800,ATT_SCHEMA_LOWER,'Atterberg (ตารางล่าง)',[CFG.GEM_PRIMARY,CFG.GEM_STABLE_FALLBACK,CFG.GEM_FALLBACK]);
+      if(Array.isArray(r)) lower=r;
+    }catch(e){ if(e.message==='NO_KEY') throw e; lowerErr=String(e.message||e); }
+    const hasData=it=>it&&typeof it==='object'&&[it.blows,it.canNo,it.a,it.b,it.c].some(v=>v!==null&&v!==undefined&&String(v).trim()!=='');
+    lower=lower.filter(hasData).map((it,i)=>{
+      const n=String(it.no??'').trim();
+      return {...it, no: /^\d+$/.test(n) ? `SS-${Number(n)}` : (n || `SS-${13+i}`)};
+    });
+
     const normNo=v=>String(v??'').trim().toUpperCase().replace(/\s+/g,'');
-    const keyNo=v=>{const n=normNo(v);const m=n.match(/(?:SS[-_]?|SAMPLE[-_]?|NO[-_]?)(\d+)$/);return m?`N${Number(m[1])}`:n;};
+    const keyNo=v=>{const n=normNo(v);const m=n.match(/^(?:SS[-_]?|SAMPLE[-_]?|NO[-_]?)?(\d+)$/);return m?`N${Number(m[1])}`:n;};
     const byKey=new Map();
-    arr.forEach((item,i)=>{
+    [...arr,...lower].forEach((item,i)=>{
       if(!item||typeof item!=='object') return;
       const k=keyNo(item.no||`SS-${i+1}`);
       if(!k) return;
+      if(byKey.has(k) && !hasData(item)) return;
       byKey.set(k,{no:item.no||`SS-${i+1}`,depth:item.depth??'',testType:item.testType??'',canNo:item.canNo??'',blows:item.blows??'',a:item.a??'',b:item.b??'',c:item.c??'',adjWater:item.adjWater??''});
     });
 
     // Replace old OCR/manual sample rows with exactly the sample columns present
     // in this uploaded table; do not retain stale rows from an earlier run.
     const ordered=[];
-    for(let i=1;i<=12;i++){
-      const item=byKey.get(`N${i}`);
-      if(item) ordered.push(item);
-    }
-    // If the model used a non-standard sample label, retain it after SS-1..SS-12.
-    byKey.forEach((item,k)=>{if(!/^N(?:[1-9]|1[0-2])$/.test(k)) ordered.push(item);});
+    // เรียงตามเลขตัวอย่าง (ตารางบน 1-12 + ตารางล่าง 13 เป็นต้นไป) ชื่อที่ไม่ใช่ตัวเลขต่อท้าย
+    const numKeys=[...byKey.keys()].filter(k=>/^N\d+$/.test(k)).sort((x,y)=>Number(x.slice(1))-Number(y.slice(1)));
+    numKeys.forEach(k=>ordered.push(byKey.get(k)));
+    byKey.forEach((item,k)=>{if(!/^N\d+$/.test(k)) ordered.push(item);});
     ATT=ordered.length?ordered:[{no:'',depth:'',testType:'',canNo:'',blows:'',a:'',b:'',c:'',adjWater:''}];
 
     renderATT(); scheduleSaveState();
     Swal.close();
-    toast(gemUsageToast(arr.__gemUsage,`อ่านข้อมูล Atterberg สำเร็จ ${ATT.length} ตัวอย่าง`),'success');
+    toast(gemUsageToast(arr.__gemUsage,`อ่านข้อมูล Atterberg สำเร็จ ${ATT.length} ตัวอย่าง`+(lower.length?` (ตารางล่าง ${lower.length})`:'')),'success');
+    if(lowerErr) toast('อ่านตารางล่างไม่สำเร็จ: '+lowerErr,'warning');
   }catch(err){
     if(err.message==='NO_KEY') return openSettings('กรุณาใส่ Gemini API Key ก่อนใช้งานปุ่ม AI OCR');
     Swal.fire({icon:'error',title:'อ่านค่า Atterberg ไม่สำเร็จ',text:String(err.message||err)});
@@ -3638,12 +3667,9 @@ const PL_TYPES = ['Clay','Sand'];
 const PL_GRP = {square:'Square Pile', I:'I-Section Pile', spun:'Spun Pile', bored:'Bore Pile'};
 
 function plDefault(){ return {
-  project:'โครงการพัฒนาน้ำบาดาลเพื่อการเกษตรแปลงใหญ่',
-  location:'รหัส 7726 (ยางพารา) ตำบลบงเหนือ อำเภอสว่างแดนดิน จังหวัดสกลนคร',
-  hole:'7726BH01', depth:'0.00-12.45', calcBy:'', gwl:'-1', top:'-1', fs:'2.5', nf:'0', capD:'800', capB:'600',
-  layers:[{from:'0',to:'1.5',type:'Sand',N:'34'},{to:'2',type:'Clay',N:'28'},{to:'2.5',type:'Clay',N:'15'},{to:'3',type:'Sand',N:'15'},
-          {to:'4',type:'Clay',N:'15'},{to:'6',type:'Sand',N:'23'},{to:'7',type:'Clay',N:'51'},{to:'12.45',type:'Clay',N:'100'}],
-  tips:[{z:'6',nc:'51',ns:''},{z:'7',nc:'100',ns:''},{z:'8',nc:'100',ns:''}],
+  project:'', location:'', hole:'', depth:'', calcBy:'', gwl:'', top:'', fs:'2.5', nf:'0', capD:'800', capB:'600',
+  layers:[{from:'0',to:'',type:'',N:''}],
+  tips:[{z:'',nc:'',ns:''}],
   dSizes:[{g:'square',B:'0.22',P:'',A:''},{g:'square',B:'0.26',P:'',A:''},{g:'square',B:'0.30',P:'',A:''},{g:'square',B:'0.35',P:'',A:''},{g:'square',B:'0.40',P:'',A:''},
           {g:'I',B:'0.22',P:'1.09',A:'0.033'},{g:'I',B:'0.26',P:'1.24',A:'0.048'},{g:'I',B:'0.30',P:'1.51',A:'0.06'},{g:'I',B:'0.35',P:'1.71',A:'0.0797'},
           {g:'spun',B:'0.40',P:'',A:'0.0766'},{g:'spun',B:'0.50',P:'',A:'0.1159'},{g:'spun',B:'0.60',P:'',A:'0.1571'}],
@@ -4135,8 +4161,6 @@ function initPileModule(){
       if(lk.isClay){ PILE.tips[i].nc=String(lk.N); PILE.tips[i].ns=''; } else { PILE.tips[i].ns=String(Math.round(lk.Nadj*100)/100); PILE.tips[i].nc=''; } n++; });
     plStructChanged(); toast(n?`เติม SPT-N ให้ปลายเข็ม ${n} ระดับแล้ว`:'ไม่พบปลายเข็มที่อยู่ในช่วงชั้นดิน', n?'success':'warning');
   });
-  on('plSampleD',()=>{ Swal.fire({icon:'question',title:'โหลดข้อมูลตัวอย่างจาก Excel?',text:'ข้อมูลหมวดเสาเข็มปัจจุบันจะถูกแทนที่ด้วยข้อมูลตัวอย่าง (7726BH01)',showCancelButton:true,confirmButtonText:'โหลด',cancelButtonText:'ยกเลิก',confirmButtonColor:'#3845a8'})
-    .then(r=>{ if(!r.isConfirmed) return; PILE=plDefault(); plRenderSettings(); plStructChanged(); toast('โหลดข้อมูลตัวอย่างแล้ว'); }); });
   on('plClearD',()=>{ Swal.fire({icon:'warning',title:'ล้างข้อมูลชั้นดินและปลายเข็ม?',text:'ขนาดเสาเข็มและพารามิเตอร์ (GWL, F.S. ฯลฯ) จะยังคงอยู่',showCancelButton:true,confirmButtonText:'ล้างข้อมูล',confirmButtonColor:'#e79c9c',cancelButtonText:'ยกเลิก'})
     .then(r=>{ if(!r.isConfirmed) return; PILE.layers=[{from:'0',to:'',type:'',N:''}]; PILE.tips=[{z:'',nc:'',ns:''}]; plStructChanged(); toast('ล้างข้อมูลชั้นดิน/ปลายเข็มแล้ว'); }); });
   ['plExportD','plExportB','plExportRD','plExportRB'].forEach(id=>on(id,plExportExcel));
